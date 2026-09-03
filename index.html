@@ -238,9 +238,10 @@
         // Neon Box Glow States
         let boxGlows = { planet: 0, star: 0, spacecraft: 0 };
 
-        // Hand Cursor State
+        // Hand Cursor State (เพิ่มตัวแปรสำหรับความนิ่ง)
         let handCursor = { x: -100, y: -100, isPinching: false };
-
+        let rawHandCursor = { x: -100, y: -100 }; // ค่าจากกล้องจริงๆ
+        
         // Mouse/Touch Drag Fallback State
         let mouseDragItem = null;
         let mousePos = { x: 0, y: 0 };
@@ -316,8 +317,8 @@
         function onHandResults(results) {
             if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
                 handCursor.isPinching = false;
-                handCursor.x = -100;
-                handCursor.y = -100;
+                rawHandCursor.x = -100;
+                rawHandCursor.y = -100;
                 return;
             }
 
@@ -329,16 +330,29 @@
             const x = (1 - indexTip.x) * canvasElement.width;
             const y = indexTip.y * canvasElement.height;
 
-            handCursor.x = x;
-            handCursor.y = y;
+            rawHandCursor.x = x;
+            rawHandCursor.y = y;
+
+            // ทำให้เคอร์เซอร์นิ่งขึ้น (Smooth Movement)
+            if (handCursor.x === -100) {
+                handCursor.x = x;
+                handCursor.y = y;
+            } else {
+                handCursor.x += (x - handCursor.x) * 0.4; // วิ่งตามไป 40% ลดการแกว่ง
+                handCursor.y += (y - handCursor.y) * 0.4;
+            }
 
             // Calculate Pinch Distance between Index & Thumb
             const tx = (1 - thumbTip.x) * canvasElement.width;
             const ty = thumbTip.y * canvasElement.height;
             const distance = Math.hypot(x - tx, y - ty);
 
-            // Pinch threshold
-            handCursor.isPinching = distance < 45;
+            // Pinch threshold พร้อมระบบหน่วงไม่ให้หลุดง่าย (Hysteresis)
+            if (!handCursor.isPinching && distance < 45) {
+                handCursor.isPinching = true; // ระยะจีบเพื่อหยิบ
+            } else if (handCursor.isPinching && distance > 70) {
+                handCursor.isPinching = false; // ต้องถ่างนิ้วกว้างหน่อยถึงจะปล่อย ป้องกันการกระตุกหลุด
+            }
         }
 
         // --- Mouse & Touch Controls (Fallback) ---
@@ -513,11 +527,16 @@
                 ctx.restore();
             });
 
-            // Spawn Words Interval (~2 seconds)
-            wordSpawnTimer += deltaTime;
-            if (wordSpawnTimer > 2000) {
-                spawnWord();
-                wordSpawnTimer = 0;
+            // เช็คว่าตอนนี้ผู้เล่นกำลังถือคำศัพท์อยู่หรือไม่
+            let isHoldingSomething = words.some(w => w.state === 'grabbed');
+
+            // Spawn Words Interval (~2.5 seconds) - หยุดเกิดชั่วคราวถ้ากำลังถือไอเทมอยู่
+            if (!isHoldingSomething) {
+                wordSpawnTimer += deltaTime;
+                if (wordSpawnTimer > 2500) { // ปรับให้เกิดช้าลงนิดหน่อยเป็น 2.5 วินาที
+                    spawnWord();
+                    wordSpawnTimer = 0;
+                }
             }
 
             // Update & Check Hand Pinch Dragging
@@ -547,7 +566,10 @@
                         w.y = activeCursorY;
                     }
                 } else {
-                    w.y += w.speed;
+                    // หากไม่ได้ถือคำศัพท์ไหนอยู่เลย ค่อยให้คำศัพท์ตกลงมา (หยุดร่วงเมื่อหยิบตัวใดตัวหนึ่งอยู่)
+                    if (!isHoldingSomething) {
+                        w.y += w.speed;
+                    }
                 }
 
                 // Check Drop in Category Zone (Bottom Box Area)
