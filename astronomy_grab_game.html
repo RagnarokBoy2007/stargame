@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>เกมดาราศาสตร์หยิบคำคว้าดาว (Astronomy Grab Game)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Prompt -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    <!-- MediaPipe Hands & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        * {
+            font-family: 'Prompt', sans-serif;
+            user-select: none;
+        }
+
+        @keyframes rgb-background {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: linear-gradient(-45deg, #0f172a, #1e1b4b, #311042, #180828, #0284c7, #4c1d95, #0f172a);
+            background-size: 400% 400%;
+            animation: rgb-background 12s ease infinite;
+            color: #ffffff;
+        }
+
+        /* Canvas Backdrop & Video Overlay */
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* ซ่อนกล้องส่วนบน ไม่ให้แสดงแทรก UI ด้านบนหน้าจออย่างถาวร */
+        video {
+            transform: scaleX(-1);
+            display: none !important;
+            position: absolute !important;
+            width: 1px !important;
+            height: 1px !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
+            z-index: -9999 !important;
+        }
+
+        canvas {
+            border-radius: 20px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.7), 0 0 15px rgba(59, 130, 246, 0.5);
+            background-color: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(8px);
+        }
+
+        /* Neon Glow Borders for UI */
+        .glow-planet { box-shadow: 0 0 20px #22c55e, inset 0 0 15px #22c55e; }
+        .glow-star { box-shadow: 0 0 20px #eab308, inset 0 0 15px #eab308; }
+        .glow-spacecraft { box-shadow: 0 0 20px #3b82f6, inset 0 0 15px #3b82f6; }
+
+        /* Custom Modal Backdrop */
+        .modal-bg {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+        }
+    </style>
+</head>
+<body class="w-screen h-screen overflow-hidden flex flex-col justify-between items-center">
+
+    <!-- Video Source for MediaPipe -->
+    <video id="webcam" autoplay playsinline></video>
+
+    <!-- App Header UI -->
+    <header class="absolute top-4 left-0 right-0 z-20 px-6 flex justify-between items-center max-w-6xl mx-auto w-full">
+        <!-- Brand & Title -->
+        <div class="flex items-center gap-3 bg-slate-900/80 border border-slate-700/60 px-5 py-2.5 rounded-2xl shadow-lg backdrop-blur-md">
+            <span class="text-3xl">🪐</span>
+            <div>
+                <h1 class="font-extrabold text-lg bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-indigo-300">เกมดาราศาสตร์คว้าดาว</h1>
+                <p class="text-xs text-slate-400">จีบนิ้ว (Pinch) หรือลากเพื่อจัดหมวดหมู่</p>
+            </div>
+        </div>
+
+        <!-- Timer & Score Display -->
+        <div class="flex items-center gap-4">
+            <!-- Timer Badge -->
+            <div class="bg-slate-900/80 border border-amber-500/40 px-5 py-2 rounded-2xl flex items-center gap-2 shadow-lg backdrop-blur-md">
+                <span class="text-xl">⏳</span>
+                <span class="text-xs text-slate-300 font-semibold uppercase tracking-wider">เวลา:</span>
+                <span id="timerText" class="text-2xl font-black text-amber-400 min-w-[45px] text-right">60</span>
+                <span class="text-xs text-amber-500">วิ</span>
+            </div>
+
+            <!-- Score Badge -->
+            <div class="bg-slate-900/80 border border-emerald-500/40 px-5 py-2 rounded-2xl flex items-center gap-2 shadow-lg backdrop-blur-md">
+                <span class="text-xl">🏆</span>
+                <span class="text-xs text-slate-300 font-semibold uppercase tracking-wider">คะแนน:</span>
+                <span id="scoreText" class="text-2xl font-black text-emerald-400 min-w-[50px] text-right">0</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Game Main Area Canvas -->
+    <main id="gameContainer" class="w-full h-full flex items-center justify-center p-4">
+        <canvas id="gameCanvas"></canvas>
+    </main>
+
+    <!-- Start Overlay Modal -->
+    <div id="startModal" class="fixed inset-0 z-50 flex items-center justify-center modal-bg px-4">
+        <div class="bg-slate-900/90 border border-cyan-500/30 p-8 rounded-3xl max-w-lg w-full text-center shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-12 -left-12 w-40 h-40 bg-cyan-500/20 rounded-full blur-3xl"></div>
+            <div class="absolute -bottom-12 -right-12 w-40 h-40 bg-purple-500/20 rounded-full blur-3xl"></div>
+
+            <div class="text-6xl mb-4 animate-bounce">🌌</div>
+            <h2 class="text-3xl font-extrabold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400">
+                นักล่าดาวดาราศาสตร์
+            </h2>
+            <p class="text-slate-300 mb-6 text-sm leading-relaxed">
+                จำแนกคำศัพท์ดาราศาสตร์ลงใน 3 หมวดหมู่:<br>
+                <span class="text-emerald-400 font-bold">🪐 ดาวเคราะห์</span> | 
+                <span class="text-amber-400 font-bold">☀️ ดาวฤกษ์</span> | 
+                <span class="text-sky-400 font-bold">🚀 ยานอวกาศ</span><br>
+                <span class="text-xs text-slate-400 mt-2 block">💡 ใช้มือจีบนิ้วหนีบหน้ากล้อง หรือใช้เมาส์/สัมผัสลากคำศัพท์ได้</span>
+            </p>
+
+            <button id="btnStartGame" class="w-full py-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-extrabold text-xl rounded-2xl shadow-lg shadow-cyan-500/30 transition-all transform hover:scale-105 active:scale-95">
+                🚀 เริ่มแข่งขันเลย! (60 วินาที)
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Over & Leaderboard Modal -->
+    <div id="gameOverModal" class="fixed inset-0 z-50 flex items-center justify-center modal-bg px-4 hidden">
+        <div class="bg-slate-900/95 border border-indigo-500/40 p-6 sm:p-8 rounded-3xl max-w-md w-full text-center shadow-2xl relative">
+            <h2 class="text-2xl font-black text-amber-400 mb-1">🏁 หมดเวลาแล้ว!</h2>
+            <p class="text-slate-400 text-xs mb-4">ผลงานการจัดหมวดหมู่อวกาศของคุณ</p>
+
+            <!-- Player Photo Snapshot Frame -->
+            <div class="relative w-36 h-36 mx-auto mb-4 rounded-2xl overflow-hidden border-4 border-cyan-400/80 shadow-lg shadow-cyan-500/20 bg-slate-800 flex items-center justify-center">
+                <img id="playerPhoto" class="w-full h-full object-cover" src="" alt="Player Snapshot">
+                <span id="rankBadge" class="absolute bottom-1 right-1 bg-amber-500 text-slate-950 font-black text-xs px-2 py-0.5 rounded-lg shadow">
+                    RANK S
+                </span>
+            </div>
+
+            <!-- Score Summary -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 mb-4 flex justify-around">
+                <div>
+                    <span class="text-xs text-slate-400 block">คะแนนรวม</span>
+                    <span id="finalScore" class="text-2xl font-black text-emerald-400">0</span>
+                </div>
+                <div class="border-r border-slate-700"></div>
+                <div>
+                    <span class="text-xs text-slate-400 block">ประเมินผล</span>
+                    <span id="evaluationText" class="text-lg font-bold text-cyan-300">สุดยอด!</span>
+                </div>
+            </div>
+
+            <!-- Leaderboard Input Form -->
+            <div class="flex gap-2 mb-4">
+                <input type="text" id="playerNameInput" placeholder="ใส่ชื่อของคุณ..." maxlength="12"
+                    class="flex-1 bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-xl text-sm focus:outline-none focus:border-cyan-400">
+                <button id="btnSaveScore" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl text-sm transition">
+                    บันทึก
+                </button>
+            </div>
+
+            <!-- Top Leaderboard List -->
+            <div class="bg-slate-800/50 rounded-xl p-3 text-left mb-5">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex justify-between">
+                    <span>🏆 ตารางอันดับสูงสุด</span>
+                    <span>Top 5</span>
+                </h3>
+                <div id="leaderboardList" class="space-y-2 max-h-36 overflow-y-auto pr-1">
+                    <!-- Leaderboard entries populated by JS -->
+                </div>
+            </div>
+
+            <button id="btnRestart" class="w-full py-3 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white font-bold rounded-xl shadow-lg transition transform hover:scale-105">
+                🔄 เล่นใหม่อีกครั้ง
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- Data Dictionary (คลังคำศัพท์ดาราศาสตร์ + Emojis) ---
+        const vocabulary = [
+            // ดาวเคราะห์ (Planet)
+            { text: "โลก", type: "planet", icon: "🌍" },
+            { text: "ดาวอังคาร", type: "planet", icon: "🔴" },
+            { text: "ดาวพฤหัสบดี", type: "planet", icon: "🪐" },
+            { text: "ดาวศุกร์", type: "planet", icon: "✨" },
+            { text: "ดาวพุธ", type: "planet", icon: "🪨" },
+            { text: "ดาวเสาร์", type: "planet", icon: "🪐" },
+            { text: "ดาวยูเรนัส", type: "planet", icon: "🧊" },
+            { text: "ดาวเนปจูน", type: "planet", icon: "🌊" },
+            
+            // ดาวฤกษ์ (Star)
+            { text: "ดวงอาทิตย์", type: "star", icon: "☀️" },
+            { text: "ซิริอุส", type: "star", icon: "🌟" },
+            { text: "เวก้า", type: "star", icon: "⭐" },
+            { text: "ไรเจล", type: "star", icon: "✨" },
+            { text: "บีเทลจุส", type: "star", icon: "💥" },
+            { text: "อัลเดบารัน", type: "star", icon: "☄️" },
+
+            // ยานอวกาศ/กล้องอวกาศ (Spacecraft)
+            { text: "อพอลโล 11", type: "spacecraft", icon: "🚀" },
+            { text: "คิวริออซิตี้", type: "spacecraft", icon: "🤖" },
+            { text: "แคสสินี", type: "spacecraft", icon: "🛰️" },
+            { text: "เจมส์เว็บบ์", type: "spacecraft", icon: "🔭" },
+            { text: "สถานีอวกาศ ISS", type: "spacecraft", icon: "🛸" },
+            { text: "โวเอเจอร์ 1", type: "spacecraft", icon: "📡" }
+        ];
+
+        // --- Game Config & Variables ---
+        const GAME_DURATION = 60; // seconds
+        let timer = GAME_DURATION;
+        let score = 0;
+        let isPlaying = false;
+        let timerInterval = null;
+        let lastTime = performance.now();
+
+        let words = [];
+        let wordSpawnTimer = 0;
+        let particles = [];
+        let floatingScores = [];
+
+        // Neon Box Glow States
+        let boxGlows = { planet: 0, star: 0, spacecraft: 0 };
+
+        // Hand Cursor State
+        let handCursor = { x: -100, y: -100, isPinching: false };
+
+        // Mouse/Touch Drag Fallback State
+        let mouseDragItem = null;
+        let mousePos = { x: 0, y: 0 };
+
+        // DOM Elements
+        const canvasElement = document.getElementById('gameCanvas');
+        const ctx = canvasElement.getContext('2d');
+        const videoElement = document.getElementById('webcam');
+        const timerText = document.getElementById('timerText');
+        const scoreText = document.getElementById('scoreText');
+        const startModal = document.getElementById('startModal');
+        const gameOverModal = document.getElementById('gameOverModal');
+        const btnStartGame = document.getElementById('btnStartGame');
+        const btnRestart = document.getElementById('btnRestart');
+        const btnSaveScore = document.getElementById('btnSaveScore');
+        const playerNameInput = document.getElementById('playerNameInput');
+        const leaderboardList = document.getElementById('leaderboardList');
+        const playerPhoto = document.getElementById('playerPhoto');
+        const finalScoreEl = document.getElementById('finalScore');
+        const evaluationText = document.getElementById('evaluationText');
+        const rankBadge = document.getElementById('rankBadge');
+
+        // Setup Canvas Resolution
+        function resizeCanvas() {
+            const container = document.getElementById('gameContainer');
+            const aspect = 16 / 9;
+            let w = container.clientWidth - 32;
+            let h = w / aspect;
+
+            if (h > container.clientHeight - 32) {
+                h = container.clientHeight - 32;
+                w = h * aspect;
+            }
+
+            canvasElement.width = w;
+            canvasElement.height = h;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- MediaPipe Hands Setup ---
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.6,
+            minTrackingConfidence: 0.6
+        });
+
+        hands.onResults(onHandResults);
+
+        let camera = null;
+
+        function initCamera() {
+            camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    if (isPlaying) {
+                        await hands.send({ image: videoElement });
+                    }
+                },
+                width: 640,
+                height: 360
+            });
+            camera.start().catch(err => {
+                console.warn("Camera fallback to touch/mouse mode:", err);
+            });
+        }
+
+        // --- Hand Detection Callback ---
+        function onHandResults(results) {
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                handCursor.isPinching = false;
+                handCursor.x = -100;
+                handCursor.y = -100;
+                return;
+            }
+
+            const landmarks = results.multiHandLandmarks[0];
+            const indexTip = landmarks[8];
+            const thumbTip = landmarks[4];
+
+            // Convert normalized coordinates (mirrored X)
+            const x = (1 - indexTip.x) * canvasElement.width;
+            const y = indexTip.y * canvasElement.height;
+
+            handCursor.x = x;
+            handCursor.y = y;
+
+            // Calculate Pinch Distance between Index & Thumb
+            const tx = (1 - thumbTip.x) * canvasElement.width;
+            const ty = thumbTip.y * canvasElement.height;
+            const distance = Math.hypot(x - tx, y - ty);
+
+            // Pinch threshold
+            handCursor.isPinching = distance < 45;
+        }
+
+        // --- Mouse & Touch Controls (Fallback) ---
+        canvasElement.addEventListener('mousedown', (e) => {
+            const rect = canvasElement.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            checkGrab(x, y, true);
+        });
+
+        canvasElement.addEventListener('mousemove', (e) => {
+            const rect = canvasElement.getBoundingClientRect();
+            mousePos.x = e.clientX - rect.left;
+            mousePos.y = e.clientY - rect.top;
+        });
+
+        canvasElement.addEventListener('mouseup', () => {
+            releaseGrab();
+        });
+
+        canvasElement.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const rect = canvasElement.getBoundingClientRect();
+            const touch = e.touches[0];
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            checkGrab(x, y, true);
+        }, { passive: false });
+
+        canvasElement.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvasElement.getBoundingClientRect();
+            const touch = e.touches[0];
+            mousePos.x = touch.clientX - rect.left;
+            mousePos.y = touch.clientY - rect.top;
+        }, { passive: false });
+
+        canvasElement.addEventListener('touchend', () => {
+            releaseGrab();
+        });
+
+        // --- Spawning Words ---
+        function spawnWord() {
+            const item = vocabulary[Math.floor(Math.random() * vocabulary.length)];
+            const padding = 120;
+            const xPos = padding + Math.random() * (canvasElement.width - padding * 2);
+
+            words.push({
+                id: Date.now() + Math.random(),
+                text: item.text,
+                icon: item.icon,
+                type: item.type,
+                x: xPos,
+                y: -60,
+                width: 130,
+                height: 75,
+                state: 'falling', // 'falling', 'grabbed'
+                speed: 0.9 + Math.random() * 0.9 // ชะลอความเร็วให้ร่วงหล่นช้าลง หยิบง่ายขึ้น
+            });
+        }
+
+        // --- Check Pinch / Click Grab ---
+        function checkGrab(cursorX, cursorY, isMouse = false) {
+            for (let w of words) {
+                const halfW = w.width / 2;
+                const halfH = w.height / 2;
+                if (cursorX >= w.x - halfW && cursorX <= w.x + halfW &&
+                    cursorY >= w.y - halfH && cursorY <= w.y + halfH) {
+                    w.state = 'grabbed';
+                    if (isMouse) mouseDragItem = w;
+                    break;
+                }
+            }
+        }
+
+        function releaseGrab() {
+            if (mouseDragItem) {
+                mouseDragItem.state = 'falling';
+                mouseDragItem = null;
+            }
+        }
+
+        // --- Create Particle FX ---
+        function createParticles(x, y, color) {
+            for (let i = 0; i < 16; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 8,
+                    vy: (Math.random() - 0.5) * 8,
+                    radius: 3 + Math.random() * 4,
+                    color: color,
+                    life: 1.0
+                });
+            }
+        }
+
+        // --- Main Game Loop ---
+        function gameLoop(now) {
+            const deltaTime = now - lastTime;
+            lastTime = now;
+
+            if (isPlaying) {
+                updateAndRender(deltaTime);
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function updateAndRender(deltaTime) {
+            ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            // Draw Mirror Video Feed onto Canvas
+            ctx.save();
+            ctx.scale(-1, 1);
+            ctx.globalAlpha = 0.35; // สลัวกล้องเล็กน้อยเพื่อความคมชัดของเกม
+            ctx.drawImage(videoElement, -canvasElement.width, 0, canvasElement.width, canvasElement.height);
+            ctx.restore();
+
+            // Dimensions for Categories Boxes
+            const boxWidth = canvasElement.width / 3;
+            const boxHeight = 130;
+            const boxY = canvasElement.height - boxHeight;
+
+            // --- Render Glow Effect on Category Boxes when Correct ---
+            const categories = [
+                { id: "planet", title: "ดาวเคราะห์", icon: "🪐", color: "#22c55e", bg: "rgba(34, 197, 94, 0.15)" },
+                { id: "star", title: "ดาวฤกษ์", icon: "☀️", color: "#eab308", bg: "rgba(234, 179, 8, 0.15)" },
+                { id: "spacecraft", title: "ยานอวกาศ", icon: "🚀", color: "#3b82f6", bg: "rgba(59, 130, 246, 0.15)" }
+            ];
+
+            categories.forEach((cat, index) => {
+                const x = index * boxWidth;
+                const isGlowing = boxGlows[cat.id] > 0;
+
+                ctx.save();
+                // Glowing Animated Border & Backdrop
+                if (isGlowing) {
+                    ctx.shadowColor = cat.color;
+                    ctx.shadowBlur = 45 * boxGlows[cat.id];
+                    ctx.fillStyle = cat.color;
+                    ctx.globalAlpha = 0.35 * boxGlows[cat.id];
+                    ctx.fillRect(x, boxY, boxWidth, boxHeight);
+
+                    boxGlows[cat.id] -= deltaTime * 0.002;
+                    if (boxGlows[cat.id] < 0) boxGlows[cat.id] = 0;
+                }
+
+                ctx.globalAlpha = 1.0;
+                // Box Base Background
+                ctx.fillStyle = isGlowing ? "rgba(30, 41, 59, 0.95)" : "rgba(15, 23, 42, 0.85)";
+                ctx.strokeStyle = cat.color;
+                ctx.lineWidth = isGlowing ? 4 : 2;
+
+                ctx.beginPath();
+                ctx.roundRect(x + 8, boxY + 8, boxWidth - 16, boxHeight - 16, 16);
+                ctx.fill();
+                ctx.stroke();
+
+                // Draw Box Label & Emoji
+                ctx.shadowBlur = 0;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+
+                ctx.font = "28px Arial";
+                ctx.fillText(cat.icon, x + boxWidth / 2, boxY + 42);
+
+                ctx.font = "bold 18px 'Prompt'";
+                ctx.fillStyle = cat.color;
+                ctx.fillText(cat.title, x + boxWidth / 2, boxY + 82);
+
+                ctx.restore();
+            });
+
+            // Spawn Words Interval (~2 seconds)
+            wordSpawnTimer += deltaTime;
+            if (wordSpawnTimer > 2000) {
+                spawnWord();
+                wordSpawnTimer = 0;
+            }
+
+            // Update & Check Hand Pinch Dragging
+            let activeCursorX = handCursor.x;
+            let activeCursorY = handCursor.y;
+
+            if (handCursor.isPinching) {
+                let grabbedItem = words.find(w => w.state === 'grabbed');
+                if (!grabbedItem) {
+                    checkGrab(activeCursorX, activeCursorY);
+                }
+            } else if (!mouseDragItem) {
+                // Release grabbed items if hand opens
+                words.forEach(w => { if (w.state === 'grabbed') w.state = 'falling'; });
+            }
+
+            // --- Update & Draw Word Cards ---
+            for (let i = words.length - 1; i >= 0; i--) {
+                let w = words[i];
+
+                if (w.state === 'grabbed') {
+                    if (mouseDragItem === w) {
+                        w.x = mousePos.x;
+                        w.y = mousePos.y;
+                    } else if (handCursor.isPinching) {
+                        w.x = activeCursorX;
+                        w.y = activeCursorY;
+                    }
+                } else {
+                    w.y += w.speed;
+                }
+
+                // Check Drop in Category Zone (Bottom Box Area)
+                if (w.y >= boxY) {
+                    let targetType = "planet";
+                    if (w.x > boxWidth && w.x <= boxWidth * 2) targetType = "star";
+                    else if (w.x > boxWidth * 2) targetType = "spacecraft";
+
+                    if (w.type === targetType) {
+                        // ✅ ถูกต้อง! บวก 10 คะแนน
+                        score += 10;
+                        scoreText.innerText = score;
+
+                        // จุดประกายกล่องเรืองแสง
+                        boxGlows[targetType] = 1.0;
+
+                        // คะแนนลอยขึ้น (+10)
+                        floatingScores.push({
+                            x: w.x,
+                            y: w.y - 40,
+                            text: "+10",
+                            color: "#4ade80",
+                            life: 1.0
+                        });
+
+                        // เอฟเฟกต์พลุละอองดาว
+                        const catColor = targetType === 'planet' ? '#22c55e' : targetType === 'star' ? '#eab308' : '#3b82f6';
+                        createParticles(w.x, w.y, catColor);
+                    } else {
+                        // ❌ ผิดหมวดหมู่
+                        floatingScores.push({
+                            x: w.x,
+                            y: w.y - 40,
+                            text: "❌",
+                            color: "#ef4444",
+                            life: 1.0
+                        });
+                    }
+
+                    words.splice(i, 1);
+                    continue;
+                }
+
+                // Draw Word Card UI
+                ctx.save();
+                const padding = 16;
+                ctx.font = "bold 16px 'Prompt'";
+                w.width = Math.max(ctx.measureText(w.text).width + padding * 2, 110);
+
+                ctx.shadowColor = w.state === 'grabbed' ? "#3b82f6" : "rgba(0, 0, 0, 0.5)";
+                ctx.shadowBlur = w.state === 'grabbed' ? 25 : 10;
+
+                ctx.fillStyle = w.state === 'grabbed' ? "rgba(255, 255, 255, 0.95)" : "rgba(30, 41, 59, 0.92)";
+                ctx.beginPath();
+                ctx.roundRect(w.x - w.width / 2, w.y - w.height / 2, w.width, w.height, 16);
+                ctx.fill();
+
+                ctx.lineWidth = w.state === 'grabbed' ? 3 : 1.5;
+                ctx.strokeStyle = w.state === 'grabbed' ? "#60a5fa" : "rgba(255, 255, 255, 0.4)";
+                ctx.stroke();
+
+                ctx.shadowBlur = 0;
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+
+                // Emoji Icon
+                ctx.font = "26px Arial";
+                ctx.fillText(w.icon, w.x, w.y - 14);
+
+                // Text Label
+                ctx.font = "bold 15px 'Prompt'";
+                ctx.fillStyle = w.state === 'grabbed' ? "#0f172a" : "#ffffff";
+                ctx.fillText(w.text, w.x, w.y + 16);
+
+                ctx.restore();
+            }
+
+            // --- Floating Scores Animation (+10 / ❌) ---
+            for (let i = floatingScores.length - 1; i >= 0; i--) {
+                let fs = floatingScores[i];
+                fs.y -= 1.8;
+                fs.life -= deltaTime * 0.0015;
+
+                if (fs.life <= 0) {
+                    floatingScores.splice(i, 1);
+                    continue;
+                }
+
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, fs.life);
+                ctx.font = "black 32px 'Prompt'";
+                ctx.fillStyle = fs.color;
+                ctx.shadowColor = fs.color;
+                ctx.shadowBlur = 12;
+                ctx.textAlign = "center";
+                ctx.fillText(fs.text, fs.x, fs.y);
+                ctx.restore();
+            }
+
+            // --- Particles FX ---
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= deltaTime * 0.0025;
+
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+
+                ctx.save();
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // --- Draw Hand Tracker Indicator ---
+            if (handCursor.x > 0) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(handCursor.x, handCursor.y, handCursor.isPinching ? 18 : 12, 0, Math.PI * 2);
+                ctx.fillStyle = handCursor.isPinching ? "#22c55e" : "#3b82f6";
+                ctx.globalAlpha = 0.8;
+                ctx.fill();
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = "#ffffff";
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // --- Timer Control ---
+        function startTimer() {
+            timer = GAME_DURATION;
+            timerText.innerText = timer;
+
+            timerInterval = setInterval(() => {
+                timer--;
+                timerText.innerText = timer;
+
+                if (timer <= 0) {
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        // --- Start Game ---
+        function startGame() {
+            score = 0;
+            words = [];
+            particles = [];
+            floatingScores = [];
+            scoreText.innerText = "0";
+
+            startModal.classList.add('hidden');
+            gameOverModal.classList.add('hidden');
+
+            isPlaying = true;
+            lastTime = performance.now();
+            startTimer();
+        }
+
+        // --- End Game & Snapshot Photo ---
+        function endGame() {
+            isPlaying = false;
+            clearInterval(timerInterval);
+
+            // Capture Snapshot Image from Video/Canvas
+            const snapCanvas = document.createElement('canvas');
+            snapCanvas.width = 300;
+            snapCanvas.height = 300;
+            const snapCtx = snapCanvas.getContext('2d');
+
+            // Draw center cropped snapshot
+            const minDim = Math.min(videoElement.videoWidth || 640, videoElement.videoHeight || 480);
+            const sx = ((videoElement.videoWidth || 640) - minDim) / 2;
+            const sy = ((videoElement.videoHeight || 480) - minDim) / 2;
+
+            snapCtx.save();
+            snapCtx.scale(-1, 1);
+            snapCtx.drawImage(videoElement, sx, sy, minDim, minDim, -300, 0, 300, 300);
+            snapCtx.restore();
+
+            playerPhoto.src = snapCanvas.toDataURL('image/png');
+
+            // Set Score Evaluation
+            finalScoreEl.innerText = score;
+
+            let rank = "C";
+            let evalMsg = "พยายามอีกนิดนะ!";
+
+            if (score >= 120) {
+                rank = "RANK S";
+                evalMsg = "ยอดเยี่ยมระดับอัจฉริยะ!";
+            } else if (score >= 80) {
+                rank = "RANK A";
+                evalMsg = "เก่งมากดาราศาสตร์แน่น!";
+            } else if (score >= 40) {
+                rank = "RANK B";
+                evalMsg = "ทำได้ดีมากครับ!";
+            }
+
+            rankBadge.innerText = rank;
+            evaluationText.innerText = evalMsg;
+
+            renderLeaderboard();
+            gameOverModal.classList.remove('hidden');
+        }
+
+        // --- Leaderboard LocalStorage Management ---
+        function getLeaderboard() {
+            return JSON.parse(localStorage.getItem('astronomy_leaderboard') || '[]');
+        }
+
+        function saveScore() {
+            const name = playerNameInput.value.trim() || "นักเรียน";
+            const leaderboard = getLeaderboard();
+
+            leaderboard.push({
+                name: name,
+                score: score,
+                photo: playerPhoto.src,
+                date: new Date().toLocaleDateString('th-TH')
+            });
+
+            // Sort High to Low
+            leaderboard.sort((a, b) => b.score - a.score);
+            const top5 = leaderboard.slice(0, 5);
+
+            localStorage.setItem('astronomy_leaderboard', JSON.stringify(top5));
+            renderLeaderboard();
+            playerNameInput.value = "";
+            btnSaveScore.disabled = true;
+            btnSaveScore.classList.add('opacity-50');
+        }
+
+        function renderLeaderboard() {
+            const leaderboard = getLeaderboard();
+            leaderboardList.innerHTML = "";
+
+            if (leaderboard.length === 0) {
+                leaderboardList.innerHTML = `<p class="text-xs text-slate-500 text-center py-2">ยังไม่มีข้อมูลอันดับ</p>`;
+                return;
+            }
+
+            leaderboard.forEach((item, index) => {
+                const medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"];
+                const el = document.createElement('div');
+                el.className = "flex items-center justify-between bg-slate-700/50 p-2 rounded-lg text-xs";
+                el.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <span>${medals[index] || "⭐️"}</span>
+                        <img src="${item.photo}" class="w-6 h-6 rounded-full object-cover border border-slate-500">
+                        <span class="font-bold text-slate-200">${item.name}</span>
+                    </div>
+                    <span class="font-black text-emerald-400">${item.score} คะแนน</span>
+                `;
+                leaderboardList.appendChild(el);
+            });
+        }
+
+        // --- Event Listeners ---
+        btnStartGame.addEventListener('click', () => {
+            initCamera();
+            startGame();
+        });
+
+        btnRestart.addEventListener('click', () => {
+            btnSaveScore.disabled = false;
+            btnSaveScore.classList.remove('opacity-50');
+            startGame();
+        });
+
+        btnSaveScore.addEventListener('click', saveScore);
+
+        // Run Loop
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
